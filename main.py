@@ -1,19 +1,8 @@
 # spam is a positive class
 
-# features        | interpretation|
-# ---------------------------------
-# from (domain)   | binary
-# word: count     | binary: cont
-# total word num  | cont
-# caps word num   | cont
-# to (domain)     | binary
-# unk word: count | binary: cont
-# num of links    | cont
-# --------------------------------|
 
-
-import matplotlib.pyplot as plt
 from split_original import split_files
+import matplotlib.pyplot as plt
 
 
 def plot_precision_recall_vs_threshold(precisions, recalls, thresholds):
@@ -34,7 +23,7 @@ def plot_roc_curve(fpr, tpr, label=None):
     plt.show()
 
 
-split_files()
+
 
 
 

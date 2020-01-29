@@ -1,8 +1,10 @@
 # spam is a positive class
 
 
-from split_original import split_files
+from split_original import split_files, get_files
+from data_preparation import FeatureExtractor
 import matplotlib.pyplot as plt
+import joblib
 
 
 def plot_precision_recall_vs_threshold(precisions, recalls, thresholds):
@@ -23,7 +25,10 @@ def plot_roc_curve(fpr, tpr, label=None):
     plt.show()
 
 
-
+fe = FeatureExtractor(max_dictionary_size=100)
+files = get_files(["train"])
+res = fe.fit_transform(files, verbose=True)
+joblib.dump(res, "dataset.pkl")
 
 
 

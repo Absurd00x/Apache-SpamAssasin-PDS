@@ -15,19 +15,19 @@ from os import listdir, makedirs
 from shutil import copyfile
 
 
+def get_files(dirs):
+    res = []
+    for directory in dirs:
+        res.extend([join(directory, f) for f in listdir(directory) if isfile(join(directory, f))])
+    return res
+
+
 def split_files(train_ratio=0.8):
 
     # getting files
     path = "original data"
     ham_dirs = ["easy_ham", "easy_ham_2", "hard_ham"]
     spam_dirs = ["spam", "spam_2"]
-
-    def get_files(dirs):
-        res = []
-        for dir in dirs:
-            full_path = join(path, dir)
-            res.extend([join(full_path, f) for f in listdir(full_path) if isfile(join(full_path, f))])
-        return res
 
     ham_files = get_files(ham_dirs)
     spam_files = get_files(spam_dirs)

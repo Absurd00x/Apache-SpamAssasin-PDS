@@ -55,4 +55,4 @@ def split_files(train_ratio=0.8):
     copy_spam(spam_files[:int(len(spam_files) * train_ratio)], "train")
     # test
     copy_ham(ham_files[int(len(ham_files) * train_ratio):], "test")
-    copy_spam(spam_files[int(len(spam_files) * train_ratio):], "test")
+    copy_spam(spam_files[int(len(spam_files) * train_ratio):], "test", duplicate=False)

@@ -28,7 +28,6 @@ def get_files(dirs):
 
 # Extracts features on the top 
 class FeatureExtractor(BaseEstimator, TransformerMixin):
-
     # Contains "word: count" pairs
     vocabulary = dict()
     # Mail prefixes after which actual message may begin
@@ -61,7 +60,6 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         # Reading all the mails and keeping them in memory
         # There are non-ASCII characters which are causing errors
         mails = [open(file_path, 'r', encoding="utf-8", errors="ignore").read() for file_path in X]
-
         # First run
         # Finding prefixes
         regexp = re.compile("\n(?!http|dns|ftp|url)([a-z0-9-_]+):", re.IGNORECASE)
@@ -77,17 +75,33 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         for prefix, count in unfiltered_prefixes.items():
             if count > 90 or prefix.startswith("X-"):
                 self._mail_prefixes.add("\n{}:".format(prefix))
-
+        del unfiltered_prefixes
         # Second run
         # Learning most frequent words in lower case
         re.compile("[a-z-_]+")
+        unfiltered_vocabulary = dict()
+        html_tag_re = re.compile("<[^>]*>")
+        regexp = re.compile("(?!([-=_+.@]+|are|the|and|www|net|org|com|for|any|int|edu|gov|mil)[^a-z])[a-z-_]{3,}")
+        url_re = re.compile("http[s]?://(?:[a-z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-f][0-9a-f]))+")
         for mail in mails:
             mail_text = mail[max([mail.find(prefix) for prefix in self._mail_prefixes]) + 1:]
             mail_text = mail_text[mail_text.find('\n') + 1:].strip("\n ")
-            lower_case_mail_text = mail_text.lower()
+            lc_mail_text = mail_text.lower()
+            # Cleaning mail out of html tags if needed
+            if not self.collect_tags:
+                lc_mail_text = re.sub(html_tag_re, "", lc_mail_text)
+            # and out of links
+            lc_mail_text = re.sub(url_re, "", lc_mail_text)
+            words = set(re.findall(regexp, lc_mail_text))
+            for word in words:
+                if word in unfiltered_vocabulary:
+                    unfiltered_vocabulary[word] += 1
+                else:
+                    unfiltered_vocabulary[word] = 1
 
-
-
+        self.vocabulary = {word: unfiltered_vocabulary[word] for word in sorted(unfiltered_vocabulary,
+                                                                                key=unfiltered_vocabulary.__getitem__,
+                                                                                reverse=True)[:self.max_dict_size]}
 
 
     # Apply regular expressions
@@ -104,14 +118,3 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 fe = FeatureExtractor()
 files = get_files(["train"])
 fe.fit(files)
-
-
-
-
-
-
-
-
-
-
-

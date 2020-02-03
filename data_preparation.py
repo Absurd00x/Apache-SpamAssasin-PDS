@@ -1,14 +1,9 @@
 import re
 
-from os.path import isfile, join
-from os import listdir
-
-# from sklearn.base import BaseEstimator, TransformerMixin
-from pandas import DataFrame, Series
-from matplotlib import pyplot as plt
+from sklearn.base import BaseEstimator, TransformerMixin
+from pandas import DataFrame
 from email import message_from_file
 from email.policy import default as default_policy
-from email import message
 from split_original import get_files
 
 
@@ -25,8 +20,7 @@ from split_original import get_files
 
 
 # Extracts features on the top
-# class FeatureExtractor(BaseEstimator, TransformerMixin):
-class FeatureExtractor:
+class FeatureExtractor(BaseEstimator, TransformerMixin):
     # Regular expressions used while fitting and transforming
     _html_tag_re = re.compile("<[^>]*>", re.IGNORECASE)
     _valuable_word_re = re.compile("(?![^a-z])[a-z-_]{3,}", re.IGNORECASE)
@@ -140,7 +134,14 @@ class FeatureExtractor:
             elif self.max_dict_size == -1:
                 print("Selecting all met words")
 
+        current_mail_number = 0
+        current_ten_percentile = 10
+
         for mail_path in X:
+            if verbose:
+                if current_mail_number > len(X) * current_ten_percentile // 100:
+                    print("Finished {}%".format(current_ten_percentile))
+                    current_ten_percentile += 10
             text = self._get_mail_text(mail_path)
             words = set(re.findall(self._valuable_word_re, text))
             for word in words:
@@ -149,10 +150,10 @@ class FeatureExtractor:
                     unfiltered_vocabulary[word] += 1
                 else:
                     unfiltered_vocabulary[word] = 1
+            current_mail_number += 1
 
-        self.vocabulary = {word for word in sorted(unfiltered_vocabulary,
-                                                   key=unfiltered_vocabulary.__getitem__,
-                                                   reverse=True)[20:self.max_dict_size]}
+        self.vocabulary = sorted(unfiltered_vocabulary.keys(), key=unfiltered_vocabulary.__getitem__,
+                                 reverse=True)[20:self.max_dict_size + 20]
         if verbose:
             print("Words learned\nFitting finished\n")
         return self
@@ -180,7 +181,7 @@ class FeatureExtractor:
         # Extracting features
         df_columns = [feature_name[feature_name.find(' ') + 1:]
                       for feature_name, collect in self.extracting_features.items() if collect]
-        df_columns.extend(list(self.vocabulary))
+        df_columns.extend(self.vocabulary)
         df_columns.append("spam")
 
         result = DataFrame(columns=df_columns)

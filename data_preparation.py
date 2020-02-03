@@ -29,7 +29,6 @@ from split_original import get_files
 class FeatureExtractor:
     # Regular expressions used while fitting and transforming
     _html_tag_re = re.compile("<[^>]*>", re.IGNORECASE)
-    _prefix_re = re.compile("\n(?!http|dns|ftp|url)([a-z0-9-_]+):", re.IGNORECASE)
     _valuable_word_re = re.compile("(?![^a-z])[a-z-_]{3,}", re.IGNORECASE)
     _url_re = re.compile("http[s]?://(?:[a-z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-f][0-9a-f]))+", re.IGNORECASE)
     _word_re = re.compile("(?![-=_+.@]+)[a-z-_]{2,}", re.IGNORECASE)
@@ -38,7 +37,7 @@ class FeatureExtractor:
     _hash_like_re = re.compile("[^\s]{20,}")
     _replied_re = re.compile(">[^\n]*")
 
-    def __init__(self, max_dictionary_size=1000, count_total_tags=True, count_total_words=True, count_total_links=True,
+    def __init__(self, max_dictionary_size=10, count_total_tags=True, count_total_words=True, count_total_links=True,
                  count_total_caps_words=True, count_unknown_words=True, extract_sender_domain=True,
                  extract_receiver_domain=True, dictionary_strategy="auto", words_to_search=None):
         """
@@ -142,7 +141,6 @@ class FeatureExtractor:
                 print("Selecting all met words")
 
         for mail_path in X:
-
             text = self._get_mail_text(mail_path)
             words = set(re.findall(self._valuable_word_re, text))
             for word in words:

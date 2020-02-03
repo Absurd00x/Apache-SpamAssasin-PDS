@@ -27,15 +27,16 @@ def plot_roc_curve(fpr, tpr, label=None):
     plt.show()
 
 
-# fe = FeatureExtractor(max_dictionary_size=20)
-# files = get_files(["train"])
-# res = fe.fit_transform(files, verbose=True)
-# joblib.dump(res, "dataset.pkl")
-ds = joblib.load("dataset.pkl").iloc[:, :5].astype(np.int)
-print(ds["total words"].sort_values(ascending=False).values[:30])
-
-ds.hist(bins=100)
-plt.show()
+fe = FeatureExtractor(max_dictionary_size=20)
+files = get_files(["train"])
+res = fe.fit_transform(files, verbose=True)
+joblib.dump(res, "dataset.pkl")
+# ds = joblib.load("dataset.pkl")
+# ds = ds.iloc[:, 7:].astype(np.int)
+# print(ds.describe())
+# TODO: Check domain influence on labels
+# ds.hist(bins=100, figsize=(12, 8))
+# plt.show()
 
 
 

@@ -248,6 +248,8 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
     def fit_transform(self, X, y=None, verbose=False, **fit_params):
         return self.fit(X, verbose=verbose).transform(X, verbose=verbose)
 
+# TODO: discover why unknown words is negative sometimes
+
 
 if __name__ == "__main__":
     fe = FeatureExtractor(max_dictionary_size=20)

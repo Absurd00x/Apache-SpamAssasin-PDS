@@ -3,6 +3,8 @@
 
 from split_original import split_files, get_files
 from data_preparation import FeatureExtractor
+import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import joblib
 
@@ -25,10 +27,15 @@ def plot_roc_curve(fpr, tpr, label=None):
     plt.show()
 
 
-fe = FeatureExtractor(max_dictionary_size=100)
-files = get_files(["train"])
-res = fe.fit_transform(files, verbose=True)
-joblib.dump(res, "dataset.pkl")
+# fe = FeatureExtractor(max_dictionary_size=20)
+# files = get_files(["train"])
+# res = fe.fit_transform(files, verbose=True)
+# joblib.dump(res, "dataset.pkl")
+ds = joblib.load("dataset.pkl").iloc[:, :5].astype(np.int)
+print(ds["total words"].sort_values(ascending=False).values[:30])
+
+ds.hist(bins=100)
+plt.show()
 
 
 

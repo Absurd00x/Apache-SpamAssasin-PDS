@@ -2,11 +2,11 @@
 # 502  + 1398 = 1900 spam (* 2 = 3800)
 #             =  252 hard ham
 
-# due to data class imbalance spam examples will be duplicated
+# due to data class imbalance spam examples are duplicated
 # split data 80-20 train-test:
 # train:
 # 3120 easy ham
-# 200  hard ham (may be merged easy ham)
+# 200  hard ham (may be merged with easy ham)
 # 3040 spam
 
 
@@ -40,7 +40,7 @@ def split_files(train_ratio=0.8):
     # splitting
     def copy_ham(files, to):
         for file in files:
-            # getting part of filename like this may be troublesome on windows
+            # getting part of filename like this may cause error on windows
             # because of the '/' symbol
             copyfile(file, join(to, "ham.{}".format(file.split('/')[-1].split('.')[-1])))
 

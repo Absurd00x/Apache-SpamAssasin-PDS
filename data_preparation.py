@@ -134,12 +134,11 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             elif self.max_dict_size == -1:
                 print("Selecting all met words")
 
-        current_mail_number = 0
         current_ten_percentile = 10
 
-        for mail_path in X:
+        for mail_number, mail_path in enumerate(X):
             if verbose:
-                if current_mail_number > len(X) * current_ten_percentile // 100:
+                if mail_number > len(X) * current_ten_percentile // 100:
                     print("Finished {}%".format(current_ten_percentile))
                     current_ten_percentile += 10
             text = self._get_mail_text(mail_path)
@@ -150,7 +149,6 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
                     unfiltered_vocabulary[word] += 1
                 else:
                     unfiltered_vocabulary[word] = 1
-            current_mail_number += 1
 
         self.vocabulary = sorted(unfiltered_vocabulary.keys(), key=unfiltered_vocabulary.__getitem__,
                                  reverse=True)[20:self.max_dict_size + 20]
@@ -186,15 +184,14 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
         result = DataFrame(columns=df_columns)
 
-        current_mail_number = 0
         current_ten_percentile = 10
 
         if verbose:
-            print("Extracting data...")
+            print("Extracting information from data...")
 
-        for mail_path in X:
+        for mail_number, mail_path in enumerate(X):
             if verbose:
-                if current_mail_number > len(X) * current_ten_percentile // 100:
+                if mail_number > len(X) * current_ten_percentile // 100:
                     print("Finished {}%".format(current_ten_percentile))
                     current_ten_percentile += 10
             feature_line = []
@@ -221,7 +218,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             known_words_counts = [len(re.findall(re.compile(word, re.IGNORECASE), filtered_mail))
                                   for word in self.vocabulary]
             if self.extracting_features["count unknown words"]:
-                feature_line.append(total_words_count - len(known_words_counts))
+                feature_line.append(total_words_count - sum(known_words_counts))
 
             if self.extracting_features["extract sender domain"]:
                 feature_line.append(self._extract_domain(mail, "From"))
@@ -238,8 +235,6 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             # Adding to dataframe
             result.loc[result.shape[0]] = feature_line
 
-            current_mail_number += 1
-
         if verbose:
             print("Finished transforming")
 
@@ -248,11 +243,9 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
     def fit_transform(self, X, y=None, verbose=False, **fit_params):
         return self.fit(X, verbose=verbose).transform(X, verbose=verbose)
 
-# TODO: discover why unknown words is negative sometimes
-
 
 if __name__ == "__main__":
     fe = FeatureExtractor(max_dictionary_size=20)
     result = fe.fit_transform(get_files(["train"]), verbose=True)
     print(result)
-    print("Here")
+    print("Test complete")

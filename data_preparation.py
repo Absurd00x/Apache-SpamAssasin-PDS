@@ -1,9 +1,13 @@
 import re
 
-from sklearn.base import BaseEstimator, TransformerMixin
-from pandas import DataFrame
+from collections import Counter
 from email import message_from_file
 from email.policy import default as default_policy
+from itertools import chain
+from multiprocessing import Pool, cpu_count
+from numpy import int64
+from pandas import DataFrame, concat
+from sklearn.base import BaseEstimator, TransformerMixin
 from split_original import get_files
 
 
@@ -18,18 +22,140 @@ from split_original import get_files
 # num of links                      | cont
 # ----------------------------------|----------------|
 
+# Regular expressions used while fitting and transforming
+regexps = {
+    "html tag": re.compile("<[^>]*>", re.IGNORECASE),
+    "valuable word": re.compile("(?![^a-z])[a-z-_]{3,}", re.IGNORECASE),
+    "url": re.compile("http[s]?://(?:[a-z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-f][0-9a-f]))+", re.IGNORECASE),
+    "word": re.compile("(?![-=_+.@]+)[a-z-_]{2,}", re.IGNORECASE),
+    "cap word": re.compile("(?![-=_+.@]+)[A-Z-_]{2,}"),
+    "domain": re.compile("<?[^<]+\.[a-zA-Z]{2,3}>?", re.IGNORECASE),
+    "hash-like": re.compile("[^\s]{20,}"),
+    "replied": re.compile(">[^\n]*")
+}
+
+
+def filter_mail_text(mail_text):
+    return re.sub(regexps["html tag"], "",
+                  re.sub(regexps["url"], "",
+                         re.sub(regexps["replied"], "",
+                                re.sub(regexps["hash-like"], "", mail_text))))
+
+
+def decode_part(part, erase_html_tags=True):
+    content_type = part.get_content_type()
+    charset = part.get_content_charset()
+    if charset is None:
+        charset = "utf-8"
+    else:
+        charset = re.sub(re.compile("_?charset_?", re.IGNORECASE), "", charset)
+    if charset == "default" or charset == "unknown-8bit":
+        charset = "utf-8"
+    if charset == "chinesebig5":
+        charset = "big5"
+    if content_type.lower().startswith("text"):
+        part_text = part.get_payload(decode=True).decode(charset, errors="ignore")
+        if content_type == "text/html":
+            if erase_html_tags:
+                return re.sub(regexps["html tag"], "", part_text)
+            return part_text
+        if content_type.startswith("text") and not content_type.endswith("headers"):
+            return part_text
+    return ''
+
+
+def extract_message(mail, erase_html_tags=True):
+    subject = str(mail["Subject"])
+    text = '\n'.join([decode_part(part, erase_html_tags) for part in mail.walk()])
+    return "{}\n{}".format(subject, text)
+
+
+def read_mail(mail_path):
+    with open(mail_path, encoding="utf-8", errors="ignore") as file:
+        return message_from_file(file, policy=default_policy)
+
+
+def get_mail_data(mail_path, erase_html_tags=True):
+    # There are non-ASCII characters which are causing errors
+    mail = read_mail(mail_path)
+    mail_text = extract_message(mail, erase_html_tags)
+    filtered_text = filter_mail_text(mail_text)
+
+    return mail, mail_text, filtered_text
+
+
+def extract_domain(mail, prefix):
+    if prefix in mail.keys():
+        regexp_result = re.findall(regexps["domain"], mail[prefix])
+        if len(regexp_result) > 0:
+            buff = regexp_result[0].strip("<>")
+            buff = buff[len(buff) - 3: len(buff)]
+            return buff.lstrip('.').lower()
+    return "unknown"
+
+
+def split_list(alist, parts=1):
+    length = len(alist)
+    return [alist[i * length // parts: (i + 1) * length // parts] for i in range(parts)]
+
+
+def learn_words_from_mails(mails_paths):
+    words_in_mails = [frozenset(re.findall(regexps["valuable word"], get_mail_data(mail_path)[2].lower()))
+                      for mail_path in mails_paths]
+    return Counter(chain.from_iterable(words_in_mails))
+
+
+def parallel_processing(func, array):
+    pool = Pool(cpu_count())
+    results = pool.map(func, array)
+    pool.close()
+    pool.join()
+    return results
+
+
+def mails_to_features(args):
+    mails_paths, vocabulary, features, df = args
+
+    for mail_path in mails_paths:
+        feature_line = []
+        mail, mail_text, filtered_mail = get_mail_data(mail_path, False)
+
+        # Adding features
+        if features["count total tags"]:
+            feature_line.append(len(re.findall(regexps["html tag"], mail_text)))
+
+        total_words_count = len(re.findall(regexps["word"], filtered_mail))
+        if features["count total words"]:
+            feature_line.append(total_words_count)
+
+        if features["count total caps words"]:
+            feature_line.append(len(re.findall(regexps["cap word"], filtered_mail)))
+
+        if features["count total links"]:
+            feature_line.append(len(re.findall(regexps["url"], mail_text)))
+
+        known_words_counts = [len(re.findall(re.compile(word, re.IGNORECASE), filtered_mail)) for word in vocabulary]
+        if features["count unknown words"]:
+            feature_line.append(total_words_count - sum(known_words_counts))
+
+        if features["extract sender domain"]:
+            feature_line.append(extract_domain(mail, "From"))
+
+        if features["extract receiver domain"]:
+            feature_line.append(extract_domain(mail, "To"))
+
+        # Adding known words
+        feature_line.extend(known_words_counts)
+        # Adding labels
+        feature_line.append(mail_path.split('/')[-1].split('.')[0] == "spam")
+        # Adding to DataFrame
+        df.loc[df.shape[0]] = feature_line
+
+    return df
+
 
 # Extracts features on the top
 class FeatureExtractor(BaseEstimator, TransformerMixin):
-    # Regular expressions used while fitting and transforming
-    _html_tag_re = re.compile("<[^>]*>", re.IGNORECASE)
-    _valuable_word_re = re.compile("(?![^a-z])[a-z-_]{3,}", re.IGNORECASE)
-    _url_re = re.compile("http[s]?://(?:[a-z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-f][0-9a-f]))+", re.IGNORECASE)
-    _word_re = re.compile("(?![-=_+.@]+)[a-z-_]{2,}", re.IGNORECASE)
-    _cap_word_re = re.compile("(?![-=_+.@]+)[A-Z-_]{2,}")
-    _domain_re = re.compile("<?[^<]+\.[a-zA-Z]{2,3}>?", re.IGNORECASE)
-    _hash_like_re = re.compile("[^\s]{20,}")
-    _replied_re = re.compile(">[^\n]*")
 
     def __init__(self, max_dictionary_size=10, count_total_tags=True, count_total_words=True, count_total_links=True,
                  count_total_caps_words=True, count_unknown_words=True, extract_sender_domain=True,
@@ -67,48 +193,8 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self.strategy = dictionary_strategy
         self.words_to_search = words_to_search
 
-        # Contains "word: count" pairs
-        self.vocabulary = dict()
-
-    def _filter_mail_text(self, mail_text):
-        return re.sub(self._html_tag_re, "",
-                      re.sub(self._url_re, "",
-                             re.sub(self._replied_re, "",
-                                    re.sub(self._hash_like_re, "", mail_text))))
-
-    def _decode_part(self, part, erase_html_tags=True):
-        content_type = part.get_content_type()
-        charset = part.get_content_charset()
-        if charset is None:
-            charset = "utf-8"
-        else:
-            charset = re.sub(re.compile("_?charset_?", re.IGNORECASE), "", charset)
-        if charset == "default" or charset == "unknown-8bit":
-            charset = "utf-8"
-        if charset == "chinesebig5":
-            charset = "big5"
-        if content_type.lower().startswith("text"):
-            part_text = part.get_payload(decode=True).decode(charset, errors="ignore")
-            if content_type == "text/html":
-                if erase_html_tags:
-                    return re.sub(self._html_tag_re, "", part_text)
-                return part_text
-            if content_type.startswith("text") and not content_type.endswith("headers"):
-                return part_text
-
-    def _extract_message(self, mail, erase_html_tags=True):
-        mail_text = str(mail["Subject"])
-        for part in mail.walk():
-            mail_text = "{}\n{}".format(mail_text, self._decode_part(part), erase_html_tags)
-        return mail_text
-
-    def _get_mail_text(self, mail_path):
-        # There are non-ASCII characters which are causing errors
-        mail = message_from_file(open(mail_path, encoding="utf-8", errors="ignore"), policy=default_policy)
-
-        mail_text = self._extract_message(mail)
-
-        return self._filter_mail_text(mail_text)
+        # Contains learned words
+        self.vocabulary = None
 
     # Construct a vocabulary
     def fit(self, X, y=None, verbose=False):
@@ -120,13 +206,10 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         """
         if self.strategy == "manual":
             print("Manual strategy is chosen. Not looking through mails")
-            self.vocabulary = set(self.words_to_search)
+            self.vocabulary = frozenset(self.words_to_search)
             return self
         if verbose:
             print("Started fitting mails...")
-
-        # Learning most frequent words in lower case
-        unfiltered_vocabulary = dict()
 
         if verbose:
             if self.max_dict_size > 0:
@@ -134,36 +217,18 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             elif self.max_dict_size == -1:
                 print("Selecting all met words")
 
-        current_ten_percentile = 10
+        # Learning most frequent words in lower case
+        results = parallel_processing(learn_words_from_mails, split_list(X, cpu_count()))
 
-        for mail_number, mail_path in enumerate(X):
-            if verbose:
-                if mail_number > len(X) * current_ten_percentile // 100:
-                    print("Finished {}%".format(current_ten_percentile))
-                    current_ten_percentile += 10
-            text = self._get_mail_text(mail_path)
-            words = set(re.findall(self._valuable_word_re, text))
-            for word in words:
-                word = word.lower()
-                if word in unfiltered_vocabulary:
-                    unfiltered_vocabulary[word] += 1
-                else:
-                    unfiltered_vocabulary[word] = 1
+        vocabulary = dict()
+        for dictionary in results:
+            vocabulary.update(dictionary)
 
-        self.vocabulary = sorted(unfiltered_vocabulary.keys(), key=unfiltered_vocabulary.__getitem__,
-                                 reverse=True)[20:self.max_dict_size + 20]
+        self.vocabulary = frozenset(sorted(vocabulary.keys(), key=vocabulary.__getitem__,
+                                    reverse=True)[20:self.max_dict_size + 20])
         if verbose:
             print("Words learned\nFitting finished\n")
         return self
-
-    def _extract_domain(self, mail, prefix):
-        if prefix in mail.keys():
-            regexp_result = re.findall(self._domain_re, mail[prefix])
-            if len(regexp_result) > 0:
-                buff = regexp_result[0].strip("<>")
-                buff = buff[len(buff) - 3: len(buff)]
-                return buff.lstrip('.').lower()
-        return "unknown"
 
     # Apply regular expressions
     def transform(self, X, y=None, verbose=False):
@@ -182,58 +247,29 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         df_columns.extend(self.vocabulary)
         df_columns.append("spam")
 
-        result = DataFrame(columns=df_columns)
+        result = DataFrame(columns=df_columns).astype(int64)
 
-        current_ten_percentile = 10
+        result["spam"] = result["spam"].astype(bool)
 
         if verbose:
             print("Extracting information from data...")
 
-        for mail_number, mail_path in enumerate(X):
-            if verbose:
-                if mail_number > len(X) * current_ten_percentile // 100:
-                    print("Finished {}%".format(current_ten_percentile))
-                    current_ten_percentile += 10
-            feature_line = []
-            mail = message_from_file(open(mail_path, encoding="utf-8", errors="ignore"), policy=default_policy)
+        nargs = [(mails_chunk, self.vocabulary, self.extracting_features, result.copy(deep=True))
+                 for mails_chunk in split_list(X, cpu_count())]
 
-            mail_text = self._extract_message(mail, erase_html_tags=False)
+        # Extracting features by blocks
+        dataframes = parallel_processing(mails_to_features, nargs)
 
-            filtered_mail = self._filter_mail_text(mail_text)
+        # Adding to DataFrame
+        for dataframe in dataframes:
+            result = concat([result, dataframe])
 
-            # Adding features
-            if self.extracting_features["count total tags"]:
-                feature_line.append(len(re.findall(self._html_tag_re, mail_text)))
+        # Converting to appropriate types
+        if self.extracting_features["extract sender domain"]:
+            result["sender domain"] = result["sender domain"].astype('category')
 
-            total_words_count = len(re.findall(self._word_re, filtered_mail))
-            if self.extracting_features["count total words"]:
-                feature_line.append(total_words_count)
-
-            if self.extracting_features["count total caps words"]:
-                feature_line.append(len(re.findall(self._cap_word_re, filtered_mail)))
-
-            if self.extracting_features["count total links"]:
-                feature_line.append(len(re.findall(self._url_re, mail_text)))
-
-            known_words_counts = [len(re.findall(re.compile(word, re.IGNORECASE), filtered_mail))
-                                  for word in self.vocabulary]
-            if self.extracting_features["count unknown words"]:
-                feature_line.append(total_words_count - sum(known_words_counts))
-
-            if self.extracting_features["extract sender domain"]:
-                feature_line.append(self._extract_domain(mail, "From"))
-
-            if self.extracting_features["extract receiver domain"]:
-                feature_line.append(self._extract_domain(mail, "To"))
-
-            # Adding known words
-            feature_line.extend(known_words_counts)
-
-            # Adding labels
-            feature_line.append(mail_path.split('/')[-1].split('.')[0] == "spam")
-
-            # Adding to dataframe
-            result.loc[result.shape[0]] = feature_line
+        if self.extracting_features["extract receiver domain"]:
+            result["receiver domain"] = result["receiver domain"].astype('category')
 
         if verbose:
             print("Finished transforming")
@@ -246,6 +282,6 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
 if __name__ == "__main__":
     fe = FeatureExtractor(max_dictionary_size=20)
-    result = fe.fit_transform(get_files(["train"]), verbose=True)
-    print(result)
+    test = fe.fit_transform(get_files(["train"]), verbose=True)
+    print(test)
     print("Test complete")

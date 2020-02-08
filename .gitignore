@@ -1,4 +1,5 @@
 original data/*
 test/*
 train/*
-dataset.pkl
+*.pkl
+*.csv

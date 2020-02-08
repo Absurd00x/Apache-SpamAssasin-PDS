@@ -4,34 +4,24 @@ from collections import Counter
 from email import message_from_file
 from email.policy import default as default_policy
 from itertools import chain
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 from numpy import int64
 from pandas import DataFrame, concat
 from sklearn.base import BaseEstimator, TransformerMixin
 from split_original import get_files
+from universal import parallel_processing, split_list
 
-
-# features                          | interpretation  |
-# ----------------------------------|-----------------|
-# from (domain)                     | binary
-# word (including tags) : count     | binary: cont
-# total word num                    | cont
-# caps word num                     | cont
-# to (domain)                       | binary
-# unk word: count                   | binary: cont
-# num of links                      | cont
-# ----------------------------------|----------------|
 
 # Regular expressions used while fitting and transforming
 regexps = {
     "html tag": re.compile("<[^>]*>", re.IGNORECASE),
-    "valuable word": re.compile("(?![^a-z])[a-z-_]{3,}", re.IGNORECASE),
+    "valuable word": re.compile("[a-z-_']{3,}", re.IGNORECASE),
     "url": re.compile("http[s]?://(?:[a-z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-f][0-9a-f]))+", re.IGNORECASE),
     "word": re.compile("(?![-=_+.@]+)[a-z-_]{2,}", re.IGNORECASE),
     "cap word": re.compile("(?![-=_+.@]+)[A-Z-_]{2,}"),
     "domain": re.compile("<?[^<]+\.[a-zA-Z]{2,3}>?", re.IGNORECASE),
     "hash-like": re.compile("[^\s]{20,}"),
-    "replied": re.compile(">[^\n]*")
+    "replied": re.compile(">[^\n]*"),
 }
 
 
@@ -94,23 +84,12 @@ def extract_domain(mail, prefix):
     return "unknown"
 
 
-def split_list(alist, parts=1):
-    length = len(alist)
-    return [alist[i * length // parts: (i + 1) * length // parts] for i in range(parts)]
-
-
 def learn_words_from_mails(mails_paths):
     words_in_mails = [frozenset(re.findall(regexps["valuable word"], get_mail_data(mail_path)[2].lower()))
                       for mail_path in mails_paths]
-    return Counter(chain.from_iterable(words_in_mails))
-
-
-def parallel_processing(func, array):
-    pool = Pool(cpu_count())
-    results = pool.map(func, array)
-    pool.close()
-    pool.join()
-    return results
+    cleared_words_in_mails = [word.strip("'_-") for word in chain.from_iterable(words_in_mails)
+                              if word.strip("'_-") != '' and len(word.strip("'_-")) > 2]
+    return Counter(cleared_words_in_mails)
 
 
 def mails_to_features(args):
@@ -159,7 +138,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
     def __init__(self, max_dictionary_size=10, count_total_tags=True, count_total_words=True, count_total_links=True,
                  count_total_caps_words=True, count_unknown_words=True, extract_sender_domain=True,
-                 extract_receiver_domain=True, dictionary_strategy="auto", words_to_search=None):
+                 extract_receiver_domain=True, dictionary_strategy="auto", words_to_search=None, n_jobs=cpu_count()):
         """
         :param max_dictionary_size: Maximum number of words that can be remembered -1 if no limit
         :param count_total_tags: Whether or not should it evaluate html tags as words
@@ -173,6 +152,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         "auto"   - most frequent (starting from top 20) will be searched
         "manual" - selected words will be searched. In this case "words_to_search" should be specified
         :param words_to_search: List of words that should be learnt
+        :param n_jobs: number of available CPUs
         """
         self.max_dict_size = max_dictionary_size
         self.extracting_features = {
@@ -187,11 +167,14 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
         if dictionary_strategy == "manual":
             if words_to_search is None:
-                raise AttributeError("dictionary_strategy is manual, but words_to_search is not specified")
+                raise AttributeError("\"dictionary_strategy\" is manual, but words_to_search is not specified")
             self.max_dict_size = len(words_to_search)
 
         self.strategy = dictionary_strategy
         self.words_to_search = words_to_search
+        if n_jobs < 1 or not isinstance(n_jobs, int):
+            raise AttributeError("\"n_jobs\" must be a positive integer")
+        self.n_jobs = n_jobs
 
         # Contains learned words
         self.vocabulary = None
@@ -218,14 +201,21 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
                 print("Selecting all met words")
 
         # Learning most frequent words in lower case
-        results = parallel_processing(learn_words_from_mails, split_list(X, cpu_count()))
+        if self.n_jobs == 1:
+            results = learn_words_from_mails(X)
+        else:
+            results = parallel_processing(learn_words_from_mails, split_list(X, self.n_jobs))
 
         vocabulary = dict()
         for dictionary in results:
             vocabulary.update(dictionary)
 
+        if self.max_dict_size == -1:
+            self.vocabulary = frozenset(sorted(vocabulary.keys(), key=vocabulary.__getitem__, reverse=True))
+            if verbose:
+                print("Actual vocabulary size is", len(self.vocabulary))
         self.vocabulary = frozenset(sorted(vocabulary.keys(), key=vocabulary.__getitem__,
-                                    reverse=True)[20:self.max_dict_size + 20])
+                                    reverse=True)[:self.max_dict_size])
         if verbose:
             print("Words learned\nFitting finished\n")
         return self
@@ -254,15 +244,16 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         if verbose:
             print("Extracting information from data...")
 
-        nargs = [(mails_chunk, self.vocabulary, self.extracting_features, result.copy(deep=True))
-                 for mails_chunk in split_list(X, cpu_count())]
-
-        # Extracting features by blocks
-        dataframes = parallel_processing(mails_to_features, nargs)
-
-        # Adding to DataFrame
-        for dataframe in dataframes:
-            result = concat([result, dataframe])
+        if self.n_jobs == 1:
+            result = mails_to_features((X, self.vocabulary, self.extracting_features, result))
+        else:
+            nargs = [(mails_chunk, self.vocabulary, self.extracting_features, result.copy(deep=True))
+                     for mails_chunk in split_list(X, self.n_jobs)]
+            # Extracting features by blocks
+            dataframes = parallel_processing(mails_to_features, nargs)
+            # Adding to DataFrame
+            for dataframe in dataframes:
+                result = concat([result, dataframe])
 
         # Converting to appropriate types
         if self.extracting_features["extract sender domain"]:

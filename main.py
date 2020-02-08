@@ -1,19 +1,20 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
 from data_preparation import FeatureExtractor
 from itertools import chain
 from multiprocessing import cpu_count
-from universal import get_files, parallel_processing, split_list, progress_measurer
+from universal import get_files, parallel_processing, split_list
 
 from sklearn.base import BaseEstimator, clone
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import GridSearchCV
-from sklearn.tree import DecisionTreeClassifier, export_graphviz
+from sklearn.neural_network import MLPClassifier
+from sklearn.tree import DecisionTreeClassifier
 
 pd.set_option("display.max_columns", 10)
 pd.set_option("display.width", 1000)
@@ -27,39 +28,21 @@ class MonkeyNotSpamClassifier(BaseEstimator):
         return np.zeros((X.shape[0], 1), dtype=bool).ravel()
 
 
-useful_words = joblib.load("useful words.pkl")
 features: pd.DataFrame
 labels: pd.Series
-features, labels = joblib.load("features labels.pkl")
+ds = pd.read_csv("test dataset.csv")
+features, labels = ds.iloc[:, :-1], ds.iloc[:, -1]
 
-dummy_score = 0.5226702268038681
+dummy_test_score = 0.5226702268038681
 print("Data loaded")
 
 models = {
-    "forest": RandomForestClassifier(n_estimators=200, random_state=42, max_depth=3, n_jobs=-1),
-    "tree": DecisionTreeClassifier(random_state=42, max_depth=105, max_features=71),
+    "forest": RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1),
+    "tree": DecisionTreeClassifier(random_state=42, max_depth=6, max_features=40),
     "sgd": SGDClassifier(random_state=42),
-    # "nn": MLPClassifier(hidden_layer_sizes=[200, 50], max_iter=2000, random_state=42),
+    "nn": MLPClassifier(random_state=42, hidden_layer_sizes=[50, 12], max_iter=1000, activation="relu"),
     "dummy": MonkeyNotSpamClassifier()
 }
-
-
-def plot_precision_recall_vs_threshold(precisions, recalls, thresholds):
-    plt.plot(thresholds, precisions[:-1], "b--", label="Precision")
-    plt.plot(thresholds, recalls[:-1], "g-", label="Recall")
-    plt.xlabel("Threshold")
-    plt.legend(loc="upper left")
-    plt.ylim([0, 1])
-    plt.show()
-
-
-def plot_roc_curve(fpr, tpr, label=None):
-    plt.plot(fpr, tpr, linewidth=2, label=label)
-    plt.plot([0, 1], [0, 1], "k--")
-    plt.axis([0, 1, 0, 1])
-    plt.xlabel("False Positive Rate")
-    plt.ylabel("True Positive Rate")
-    plt.show()
 
 
 def extract_features(extractor: FeatureExtractor, train=True):
@@ -78,7 +61,7 @@ def check_domains(ds, column, model):
     for domain in set(ds[column].values):
         series = np.where(ds[column].values == domain, 1, 0)
         score = np.mean(cross_val_score(model, series.reshape(-1, 1), labels, cv=5))
-        if abs(score - dummy_score) > 0.01:
+        if abs(score - dummy_test_score) > 0.01:
             print("\"{}\" is a valuable {}\tscore: {}".format(domain, column, score))
             domains[domain] = series
     return domains
@@ -90,8 +73,7 @@ def check_words(args):
     for word in words_features.columns:
         series = words_features[word]
         score = np.mean(cross_val_score(model, series.values.reshape(-1, 1), labels, cv=5))
-        if abs(score - dummy_score) > 0.0001:
-            # print("\"{}\" is a valuable word\t score: {}".format(word, score))
+        if abs(score - dummy_test_score) > 0.0001:
             useful_words.append(word)
     return tuple(useful_words)
 
@@ -105,7 +87,7 @@ def test_models(models_dict, x, y):
 
 def test_model(model, x, y):
     score = np.mean(cross_val_score(model, x, y, scoring='accuracy', cv=5))
-    print("Model scored {:.2f}% using data from above".format(score))
+    print("Model scored {:.2f}%".format(score * 100))
 
 
 def discover_useful_words(words, model=models["tree"]):
@@ -115,7 +97,6 @@ def discover_useful_words(words, model=models["tree"]):
     useful_words_num = len(useful_words)
     print("useful words number is {} out of {} total => {:.2f}%".format(
         useful_words_num, words_num, useful_words_num * 100 / words_num))
-    # joblib.dump(useful_words, "useful words.pkl")
 
 
 def print_gridsearch_results(gs_object: GridSearchCV):
@@ -126,12 +107,6 @@ def print_gridsearch_results(gs_object: GridSearchCV):
         print("{}, {} {:.6f} {:.6f}".format(rank, params, mean_score, std_score))
 
 
-# ds = extract_features(train=False)
-# joblib.dump((ds.iloc[:, :-1], ds.iloc[:, -1]), "test features labels.pkl")
-
-# TODO: read words from spam files, manually add them to file
-# TODO: look for more spam words in X-dumb-filter parameters
-# TODO: count all linux terms as useful words (like "linux", "torvalds", "arch", "apt", "server")
-
-# want make net some save buy top account fast lose off lowest body yes thousands investment
-# contact
+nn: MLPClassifier = joblib.load("best model.pkl")
+predictions = nn.predict(features)
+print("Final score: {}%".format(np.sum(predictions == labels) * 100 / len(labels)))

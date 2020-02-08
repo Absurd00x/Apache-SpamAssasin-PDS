@@ -9,17 +9,10 @@
 # 200  hard ham (may be merged with easy ham)
 # 3040 spam
 
-
-from os.path import isfile, isdir, join
-from os import listdir, makedirs
+from os.path import isdir, join
+from os import makedirs
 from shutil import copyfile
-
-
-def get_files(dirs):
-    res = []
-    for directory in dirs:
-        res.extend([join(directory, f) for f in listdir(directory) if isfile(join(directory, f))])
-    return res
+from universal import get_files
 
 
 def split_files(train_ratio=0.8):

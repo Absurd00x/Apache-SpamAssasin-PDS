@@ -6,8 +6,7 @@ import joblib
 from data_preparation import FeatureExtractor
 from itertools import chain
 from multiprocessing import cpu_count
-from split_original import get_files
-from universal import parallel_processing, split_list, progress_measurer
+from universal import get_files, parallel_processing, split_list, progress_measurer
 
 from sklearn.base import BaseEstimator, clone
 from sklearn.ensemble import RandomForestClassifier
@@ -63,11 +62,9 @@ def plot_roc_curve(fpr, tpr, label=None):
     plt.show()
 
 
-def extract_features(train=True):
-    fe = FeatureExtractor(extract_receiver_domain=False, extract_sender_domain=False,
-                          dictionary_strategy="manual", words_to_search=useful_words)
+def extract_features(extractor: FeatureExtractor, train=True):
     files = get_files(["train"]) if train else get_files(["test"])
-    return fe.fit_transform(files, verbose=True)
+    return extractor.fit_transform(files, verbose=True)
 
 
 def get_non_zero_info(words_features):
@@ -132,8 +129,9 @@ def print_gridsearch_results(gs_object: GridSearchCV):
 # ds = extract_features(train=False)
 # joblib.dump((ds.iloc[:, :-1], ds.iloc[:, -1]), "test features labels.pkl")
 
-model: DecisionTreeClassifier = joblib.load("best model.pkl")
+# TODO: read words from spam files, manually add them to file
+# TODO: look for more spam words in X-dumb-filter parameters
+# TODO: count all linux terms as useful words (like "linux", "torvalds", "arch", "apt", "server")
 
-feature_importance = dict(zip(features.columns, model.feature_importances_))
-for feature in sorted(feature_importance.keys(), key=feature_importance.__getitem__, reverse=True):
-    print("{}:\t{}".format(feature, feature_importance[feature]))
+# want make net some save buy top account fast lose off lowest body yes thousands investment
+# contact

@@ -1,4 +1,6 @@
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count, Pool
+from os.path import isfile, join
+from os import listdir
 
 
 def progress_measurer(total_size):
@@ -26,4 +28,11 @@ def parallel_processing(func, array):
 def split_list(alist, parts=1):
     length = len(alist)
     return [alist[i * length // parts: (i + 1) * length // parts] for i in range(parts)]
+
+
+def get_files(dirs):
+    res = []
+    for directory in dirs:
+        res.extend([join(directory, f) for f in listdir(directory) if isfile(join(directory, f))])
+    return res
 

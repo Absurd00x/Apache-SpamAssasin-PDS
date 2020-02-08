@@ -8,9 +8,7 @@ from multiprocessing import cpu_count
 from numpy import int64
 from pandas import DataFrame, concat
 from sklearn.base import BaseEstimator, TransformerMixin
-from split_original import get_files
-from universal import parallel_processing, split_list
-
+from universal import get_files, parallel_processing, split_list
 
 # Regular expressions used while fitting and transforming
 regexps = {
@@ -189,7 +187,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         """
         if self.strategy == "manual":
             print("Manual strategy is chosen. Not looking through mails")
-            self.vocabulary = frozenset(self.words_to_search)
+            self.vocabulary = tuple(self.words_to_search)
             return self
         if verbose:
             print("Started fitting mails...")
@@ -202,20 +200,19 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
         # Learning most frequent words in lower case
         if self.n_jobs == 1:
-            results = learn_words_from_mails(X)
+            vocabulary = learn_words_from_mails(X)
         else:
             results = parallel_processing(learn_words_from_mails, split_list(X, self.n_jobs))
-
-        vocabulary = dict()
-        for dictionary in results:
-            vocabulary.update(dictionary)
+            vocabulary = dict()
+            for dictionary in results:
+                vocabulary.update(dictionary)
 
         if self.max_dict_size == -1:
-            self.vocabulary = frozenset(sorted(vocabulary.keys(), key=vocabulary.__getitem__, reverse=True))
+            self.vocabulary = tuple(sorted(vocabulary.keys(), key=vocabulary.__getitem__, reverse=True))
             if verbose:
                 print("Actual vocabulary size is", len(self.vocabulary))
-        self.vocabulary = frozenset(sorted(vocabulary.keys(), key=vocabulary.__getitem__,
-                                    reverse=True)[:self.max_dict_size])
+        self.vocabulary = tuple(sorted(vocabulary.keys(), key=vocabulary.__getitem__,
+                                       reverse=True)[:self.max_dict_size])
         if verbose:
             print("Words learned\nFitting finished\n")
         return self

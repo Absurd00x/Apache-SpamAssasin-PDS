@@ -27,7 +27,7 @@ def filter_mail_text(mail_text):
     return re.sub(regexps["html tag"], "",
                   re.sub(regexps["url"], "",
                          re.sub(regexps["replied"], "",
-                                re.sub(regexps["hash-like"], "", mail_text))))
+                                re.sub(regexps["hash-like"], "", mail_text)))).lower()
 
 
 def decode_part(part, erase_html_tags=True):
@@ -83,7 +83,7 @@ def extract_domain(mail, prefix):
 
 
 def learn_words_from_mails(mails_paths):
-    words_in_mails = [frozenset(re.findall(regexps["valuable word"], get_mail_data(mail_path)[2].lower()))
+    words_in_mails = [frozenset(re.findall(regexps["valuable word"], get_mail_data(mail_path)[2]))
                       for mail_path in mails_paths]
     cleared_words_in_mails = [word.strip("'_-") for word in chain.from_iterable(words_in_mails)
                               if word.strip("'_-") != '' and len(word.strip("'_-")) > 2]
@@ -111,7 +111,9 @@ def mails_to_features(args):
         if features["count total links"]:
             feature_line.append(len(re.findall(regexps["url"], mail_text)))
 
-        known_words_counts = [len(re.findall(re.compile(word, re.IGNORECASE), filtered_mail)) for word in vocabulary]
+        counted_words = Counter(re.findall(regexps["valuable word"], filtered_mail))
+        known_words_counts = [counted_words.get(word, 0) for word in vocabulary]
+
         if features["count unknown words"]:
             feature_line.append(total_words_count - sum(known_words_counts))
 
@@ -184,9 +186,9 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             raise AttributeError(response.format(self.strategy))
 
     # Construct a vocabulary
-    def fit(self, X, y=None, verbose=False):
+    def fit(self, x, y=None, verbose=False):
         """
-        :param X: Expects list of mail file paths
+        :param x: Expects list of mail file paths
         :param y: Ignore this parameter
         :param verbose: Whether or not it should print progress
         :return: self
@@ -203,9 +205,9 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
         # Learning most frequent words in lower case
         if self.n_jobs == 1:
-            vocabulary = learn_words_from_mails(X)
+            vocabulary = learn_words_from_mails(x)
         else:
-            results = parallel_processing(learn_words_from_mails, split_list(X, self.n_jobs))
+            results = parallel_processing(learn_words_from_mails, split_list(x, self.n_jobs))
             vocabulary = dict()
             for dictionary in results:
                 vocabulary.update(dictionary)
@@ -221,9 +223,9 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         return self
 
     # Apply regular expressions
-    def transform(self, X, y=None, verbose=False):
+    def transform(self, x, y=None, verbose=False):
         """
-        :param X: Expects list of mail file paths
+        :param x: Expects list of mail file paths
         :param y: Ignore this parameter
         :param verbose: Whether or not it should print progress
         :return: Pandas DataFrame, containing several features
@@ -235,20 +237,20 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         df_columns = [feature_name[feature_name.find(' ') + 1:]
                       for feature_name, collect in self.extracting_features.items() if collect]
         df_columns.extend(self.vocabulary)
-        df_columns.append("spam")
+        df_columns.append("is spam")
 
-        result = DataFrame(columns=df_columns).astype(int64)
+        result = DataFrame(columns=df_columns).astype(int)
 
-        result["spam"] = result["spam"].astype(bool)
+        result["is spam"] = result["is spam"].astype(bool)
 
         if verbose:
             print("Extracting information from data...")
 
         if self.n_jobs == 1:
-            result = mails_to_features((X, self.vocabulary, self.extracting_features, result))
+            result = mails_to_features((x, self.vocabulary, self.extracting_features, result))
         else:
             nargs = [(mails_chunk, self.vocabulary, self.extracting_features, result.copy(deep=True))
-                     for mails_chunk in split_list(X, self.n_jobs)]
+                     for mails_chunk in split_list(x, self.n_jobs)]
             # Extracting features by blocks
             dataframes = parallel_processing(mails_to_features, nargs)
             # Adding to DataFrame
@@ -272,7 +274,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
 
 if __name__ == "__main__":
-    fe = FeatureExtractor(max_dictionary_size=20)
+    fe = FeatureExtractor(max_dictionary_size=100)
     test = fe.fit_transform(get_files(["train"]), verbose=True)
     print(test)
     print("Test complete")

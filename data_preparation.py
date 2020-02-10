@@ -175,7 +175,13 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self.n_jobs = n_jobs
 
         # Contains learned words
-        self.vocabulary = None
+        if self.strategy == "auto":
+            self.vocabulary = None
+        elif self.strategy == "manual":
+            self.vocabulary = tuple(self.words_to_search)
+        else:
+            response = "Strategy \"{}\" is not implemented\nUse either \"auto\" or \"manual\""
+            raise AttributeError(response.format(self.strategy))
 
     # Construct a vocabulary
     def fit(self, X, y=None, verbose=False):
@@ -187,12 +193,9 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         """
         if self.strategy == "manual":
             print("Manual strategy is chosen. Not looking through mails")
-            self.vocabulary = tuple(self.words_to_search)
             return self
         if verbose:
             print("Started fitting mails...")
-
-        if verbose:
             if self.max_dict_size > 0:
                 print("Selecting up to {} most frequent words...".format(self.max_dict_size))
             elif self.max_dict_size == -1:
